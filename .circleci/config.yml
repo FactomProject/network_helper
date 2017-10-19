@@ -1,0 +1,86 @@
+version: 2
+
+jobs:
+
+  # Build the  container
+  build:
+    working_directory: ~/network_helper
+
+    docker:
+      - image: factominc/elixir_python
+
+    steps:
+      - checkout
+
+      - setup_remote_docker:
+          version: 17.06.0-ce
+
+      - run:
+          name: Make containers
+          command: |
+            docker build -t network_helper .
+
+      - run:
+          name: Push images to DockerHub
+          command: |
+
+           # Login to DockerHub
+            docker login -u $DOCKER_USER -p $DOCKER_PASSWORD
+
+            if [ "${CIRCLE_BRANCH}" == "master" ] || [ "${CIRCLE_BRANCH}" == "develop" ]; then
+
+              # If there is a tag, use it
+              if [ "$CIRCLE_TAG" != "" ]; then
+                docker tag network_helper factominc/network_helper:${TAG}
+                docker push factominc/network_helper:${TAG}
+              fi
+
+              # But tag it as latest anyhow
+              docker tag network_helper factominc/network_helper:latest
+              docker push factominc/network_helper:latest
+            fi
+
+            docker logout
+
+      - run:
+          name: Push images to AWS ECR
+          command: |
+            # Login to AWS ECR
+            login="$(aws ecr get-login  --no-include-email --region $AWS_REGION)"
+            ${login}
+
+            if [ "${CIRCLE_BRANCH}" == "master" ] || [ "${CIRCLE_BRANCH}" == "develop" ]; then
+
+              # If there is a tag, use it
+              if [ "$CIRCLE_TAG" != "" ]; then
+                docker tag network_helper ${AWS_REPO_BASE_URI}/network_helper:${TAG}
+                docker push ${AWS_REPO_BASE_URI}/network_helper:${TAG}
+
+              fi
+
+              # But tag it as latest anyhow
+              docker tag network_helper ${AWS_REPO_BASE_URI}/network_helper:latest
+              docker push ${AWS_REPO_BASE_URI}/network_helper:latest
+
+            fi
+
+            docker logout
+
+workflows:
+  version: 2
+  commit-workflow:
+    jobs:
+      - build:
+          context: org-global
+
+
+  scheduled-workflow:
+    triggers:
+      - schedule:
+          cron: "50 5 * * *"
+          filters:
+            branches:
+              only: develop
+    jobs:
+      - build:
+          context: org-global
